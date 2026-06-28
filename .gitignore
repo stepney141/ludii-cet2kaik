@@ -1,5 +1,6 @@
 tmp
 *.class
+.build
 
 ludii-docs
 cet2kaik-docs
