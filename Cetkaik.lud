@@ -1,0 +1,2238 @@
+(define "IsTam2At"
+    (= (what at:#1) (id "Tam2" Neutral))
+)
+
+(define "IsFriendAt"
+    (= (who at:#1) (mover))
+)
+
+(define "IsEnemyAt"
+    (is Enemy (who at:#1))
+)
+
+(define "EnemyHueUai1Sites"
+    (intersection
+        (sites Occupied by:Enemy components:{"LudecletiUai1" "DelunletiUai1"})
+        (union (sites "TamHue") (sites Around (where "Tam2" Neutral) All))
+    )
+)
+
+(define "IsProtectedEnemyAt"
+    (and {
+        ("IsEnemyAt" #1)
+        (> (count Sites in:(intersection (sites Around #1 All) "EnemyHueUai1Sites")) 0)
+    })
+)
+
+(define "CanLandAt"
+    (and {
+        (not ("IsFriendAt" #1))
+        (not ("IsTam2At" #1))
+        (not ("IsProtectedEnemyAt" #1))
+    })
+)
+
+(define "NoBoardStacks"
+    (= 0 (count Sites in:(forEach (sites Board) if:(> (size Stack at:(site)) 1))))
+)
+
+(define "BoardStacksAllowed"
+    (or {
+        (> (var "StepOverPending") 0)
+        "NoBoardStacks"
+    })
+)
+
+(define "CapturePiece"
+    (apply
+        (if ("IsEnemyAt" (to))
+            (and {
+                (add
+                    (piece (mapEntry "Captured" (what at:(to))))
+                    (to (mapEntry "Where" (what at:(to))))
+                )
+                (remove (to))
+            })
+        )
+    )
+)
+
+(define "ClearLastTam2Move"
+    (set Var "LastTam2Mover" 0)
+)
+
+(define "InitialiseControlVars"
+    (and {
+        (set Var "StarterChosen" 0)
+        (set Var "StepOverPending" 0)
+        (set Var "StepOverTurn" (- 0 1))
+        (set Var "StepOverOrigin" (- 0 1))
+        (set Var "StepOverVia" (- 0 1))
+        (set Var "StepOverDirection" (- 0 1))
+        (set Var "StepOverPips" (- 0 1))
+        (set Var "StepOverMode" 0)
+        (set Var "StepOverArmedOrigin" (- 0 1))
+        (set Var "DeclarationPending" 0)
+        (set Var "LastTam2Mover" 0)
+        (set Var "Tam2Pending" 0)
+        (set Var "Tam2Futile" 0)
+        (set Var "KnownRoleScoreP1" 0)
+        (set Var "KnownRoleScoreP2" 0)
+        (set Var "SituationRoleScoreP1" 0)
+        (set Var "SituationRoleScoreP2" 0)
+        (set Var "NewSituationRoleP1" 0)
+        (set Var "NewSituationRoleP2" 0)
+        (set Var "SeasonRate" 1)
+        (set Var "PendingClaim" 0)
+        (set Var "ScoreTransfer" 0)
+        (set Var "StartNextSeason" 0)
+        (if (< (var "Season") 0) (set Var "Season" 0))
+    })
+)
+
+(define "AfterStandardMove"
+    (and {
+        "ClearLastTam2Move"
+        "ClearStepOverMode"
+    })
+)
+
+(define "NormalMoveMode"
+    (= (var "StepOverMode") 0)
+)
+
+(define "ArmedStepOverMode"
+    (= (var "StepOverMode") 1)
+)
+
+(define "ClearStepOverMode"
+    (and {
+        (set Var "StepOverMode" 0)
+        (set Var "StepOverArmedOrigin" (- 0 1))
+    })
+)
+
+(define "ArmStepOver"
+    (move Select
+        (from (sites Occupied by:Mover container:"Board") if:(and {
+            "NormalMoveMode"
+            (!= (var "StepOverTurn") (count Turns))
+            (>
+                (count Sites in:(intersection
+                    (sites Direction from:(from) All stop:(is Occupied (to)) stopIncluded:True)
+                    (sites Occupied by:All)
+                ))
+                0
+            )
+        }))
+        (then
+            (and {
+                (set Var "StepOverMode" 1)
+                (set Var "StepOverArmedOrigin" (last From))
+                (moveAgain)
+            })
+        )
+    )
+)
+
+(define "CancelArmedStepOver"
+    (move Select
+        (from (var "StepOverArmedOrigin"))
+        (then (set Var "StepOverMode" 2))
+    )
+)
+
+(define "AddSituationRoleMover"
+    (if (is Mover P1)
+        (and {
+            (set Var "SituationRoleScoreP1" (+ (var "SituationRoleScoreP1") #1))
+            (set Var "NewSituationRoleP1" 1)
+        })
+        (and {
+            (set Var "SituationRoleScoreP2" (+ (var "SituationRoleScoreP2") #1))
+            (set Var "NewSituationRoleP2" 1)
+        })
+    )
+)
+
+(define "WaterEntryStartInWater"
+    (if (= (last From) (var "StepOverVia"))
+        (is In (var "StepOverOrigin") (sites "TamNua"))
+        (is In (last From) (sites "TamNua"))
+    )
+)
+
+(define "WithWaterEntryCheck"
+    (or {
+        (do
+            #1
+            ifAfterwards:(not ("NeedsWaterRoll"))
+        )
+        (do
+            (roll)
+            next:#1
+            ifAfterwards:(and {("NeedsWaterRoll") (>= (count Pips) 3)})
+        )
+        (do
+            (roll)
+            next:(if (> (var "StepOverPending") 0) "CancelStepOver" (move Pass))
+            ifAfterwards:(and {(< (count Pips) 3) (can Move (do #1 ifAfterwards:"NeedsWaterRoll"))})
+        )
+    })
+)
+
+(define "FirstStickSite"
+    (+ (count Cells) (+ (count Sites in:(sites Hand P1)) (count Sites in:(sites Hand P2))))
+)
+
+(define "ThrowSticks"
+    (do
+        (roll)
+        next:(move Select
+            (from (sites {("FirstStickSite")}))
+            (then #1)
+        )
+    )
+)
+
+(define "ThrowStepOverSticks"
+    ("ThrowSticks"
+        (and {
+            (set Var "StepOverPips" (count Pips))
+            (moveAgain)
+        })
+    )
+)
+
+(define "ChooseStarter"
+    (if (<= (var "StarterStage") 0)
+        ("ThrowSticks"
+            (and {
+                "InitialiseControlVars"
+                (set Var "StarterP1" (count Pips))
+                (set Var "StarterStage" 1)
+                (set NextPlayer (player 2))
+            })
+        )
+        ("ThrowSticks"
+            (if (> (var "StarterP1") (count Pips))
+                (and {
+                    (set Var "StarterChosen" 1)
+                    (set Var "StarterStage" 0)
+                    (set NextPlayer (player 1))
+                })
+                (if (< (var "StarterP1") (count Pips))
+                    (and {
+                        (set Var "StarterChosen" 1)
+                        (set Var "StarterStage" 0)
+                        (set NextPlayer (player 2))
+                    })
+                    (and {
+                        (set Var "StarterStage" 0)
+                        (set NextPlayer (player 1))
+                    })
+                )
+            )
+        )
+    )
+)
+
+(define "TwoStepOrHop"
+    (if "NormalMoveMode"
+        ("WithWaterEntryCheck"
+            (move Slide
+                #1
+                (between (exact 2) if:True)
+                (to if:("CanLandAt" (to)) "CapturePiece")
+                (then "AfterStandardMove")
+            )
+        )
+    )
+)
+
+(define "StepCapture"
+    (if "NormalMoveMode"
+        ("WithWaterEntryCheck"
+            (move Step
+                #1
+                (to if:("CanLandAt" (to)) "CapturePiece")
+                (then "AfterStandardMove")
+            )
+        )
+    )
+)
+
+(define "SlideCapture"
+    (if "NormalMoveMode"
+        ("WithWaterEntryCheck"
+            (move
+                (from (from))
+                (to
+                    (sites Direction from:(from) #1)
+                    if:(and {
+                        ("CanLandAt" (to))
+                        (= 0 (count Sites in:(intersection (sites Between from:(from) to:(to)) (sites Occupied by:All))))
+                    })
+                    "CapturePiece"
+                )
+                (then "AfterStandardMove")
+            )
+        )
+    )
+)
+
+(define "SlideCaptureMinDistance"
+    (if "NormalMoveMode"
+        ("WithWaterEntryCheck"
+            (move
+                (from (from))
+                (to
+                    (sites Direction from:(from) #1)
+                    if:(and {
+                        (>= (count Steps (from) (to)) #2)
+                        ("CanLandAt" (to))
+                        (= 0 (count Sites in:(intersection (sites Between from:(from) to:(to)) (sites Occupied by:All))))
+                    })
+                    "CapturePiece"
+                )
+                (then "AfterStandardMove")
+            )
+        )
+    )
+)
+
+(define "TwoStepNoHop"
+    (if "NormalMoveMode"
+        ("WithWaterEntryCheck"
+            (move Slide
+                #1
+                (between (exact 2) if:(is Empty (between)))
+                (to if:("CanLandAt" (to)) "CapturePiece")
+                (then "AfterStandardMove")
+            )
+        )
+    )
+)
+
+(define "SteppedTam2Penalty"
+    (apply
+        (if (= (what at:(between)) (id "Tam2" Neutral))
+            ("AddSituationRoleMover" -5)
+        )
+    )
+)
+
+(define "ActualStepStart"
+    (move
+        (from (from) if:(and {"ArmedStepOverMode" (= (from) (var "StepOverArmedOrigin"))}))
+        (to #1 if:(and {
+            (!= (var "StepOverTurn") (count Turns))
+            (is Occupied (to))
+            "HasAnyStepOverFinishFromVia"
+        }))
+        stack:True
+        (then
+            (and {
+                (set Var "StepOverOrigin" (last From))
+                (set Var "StepOverVia" (last To))
+                (set Var "StepOverPending" #2)
+                (set Var "StepOverTurn" (count Turns))
+                "ClearStepOverMode"
+                (if (= (what at:(last To)) (id "Tam2" Neutral)) ("AddSituationRoleMover" -5))
+                (moveAgain)
+            })
+        )
+    )
+)
+
+(define "StepModeChoice"
+    ("ActualStepStart" #1 #2 #3)
+)
+
+(define "MovingPieceIsNuak1"
+    (or {
+        (= (what at:(from)) (id "LudecletiNuak1" Mover))
+        (= (what at:(from)) (id "DelunletiNuak1" Mover))
+    })
+)
+
+(define "MovingPieceIsKauk2"
+    (or {
+        (= (what at:(from)) (id "LudecletiKauk2" Mover))
+        (= (what at:(from)) (id "DelunletiKauk2" Mover))
+    })
+)
+
+(define "MovingPieceIsGua2"
+    (or {
+        (= (what at:(from)) (id "LudecletiGua2" Mover))
+        (= (what at:(from)) (id "DelunletiGua2" Mover))
+    })
+)
+
+(define "MovingPieceIsKaun1"
+    (or {
+        (= (what at:(from)) (id "LudecletiKaun1" Mover))
+        (= (what at:(from)) (id "DelunletiKaun1" Mover))
+    })
+)
+
+(define "MovingPieceIsDau2"
+    (or {
+        (= (what at:(from)) (id "LudecletiDau2" Mover))
+        (= (what at:(from)) (id "DelunletiDau2" Mover))
+    })
+)
+
+(define "MovingPieceIsMaun1"
+    (or {
+        (= (what at:(from)) (id "LudecletiMaun1" Mover))
+        (= (what at:(from)) (id "DelunletiMaun1" Mover))
+    })
+)
+
+(define "MovingPieceIsKua2"
+    (or {
+        (= (what at:(from)) (id "LudecletiKua2" Mover))
+        (= (what at:(from)) (id "DelunletiKua2" Mover))
+    })
+)
+
+(define "MovingPieceIsTuk2"
+    (or {
+        (= (what at:(from)) (id "LudecletiTuk2" Mover))
+        (= (what at:(from)) (id "DelunletiTuk2" Mover))
+    })
+)
+
+(define "MovingPieceIsUai1"
+    (or {
+        (= (what at:(from)) (id "LudecletiUai1" Mover))
+        (= (what at:(from)) (id "DelunletiUai1" Mover))
+    })
+)
+
+(define "MovingPieceIsIo"
+    (or {
+        (= (what at:(from)) (id "LudecletiIo" Mover))
+        (= (what at:(from)) (id "DelunletiIo" Mover))
+    })
+)
+
+(define "StepOverPiece"
+    (what at:(var "StepOverVia") level:(topLevel at:(var "StepOverVia")))
+)
+
+(define "StepOverPieceIsNuak1"
+    (or {
+        (= "StepOverPiece" (id "LudecletiNuak1" Mover))
+        (= "StepOverPiece" (id "DelunletiNuak1" Mover))
+    })
+)
+
+(define "StepOverPieceIsKauk2"
+    (or {
+        (= "StepOverPiece" (id "LudecletiKauk2" Mover))
+        (= "StepOverPiece" (id "DelunletiKauk2" Mover))
+    })
+)
+
+(define "StepOverPieceIsGua2"
+    (or {
+        (= "StepOverPiece" (id "LudecletiGua2" Mover))
+        (= "StepOverPiece" (id "DelunletiGua2" Mover))
+    })
+)
+
+(define "StepOverPieceIsKaun1"
+    (or {
+        (= "StepOverPiece" (id "LudecletiKaun1" Mover))
+        (= "StepOverPiece" (id "DelunletiKaun1" Mover))
+    })
+)
+
+(define "StepOverPieceIsDau2"
+    (or {
+        (= "StepOverPiece" (id "LudecletiDau2" Mover))
+        (= "StepOverPiece" (id "DelunletiDau2" Mover))
+    })
+)
+
+(define "StepOverPieceIsMaun1"
+    (or {
+        (= "StepOverPiece" (id "LudecletiMaun1" Mover))
+        (= "StepOverPiece" (id "DelunletiMaun1" Mover))
+    })
+)
+
+(define "StepOverPieceIsKua2"
+    (or {
+        (= "StepOverPiece" (id "LudecletiKua2" Mover))
+        (= "StepOverPiece" (id "DelunletiKua2" Mover))
+    })
+)
+
+(define "StepOverPieceIsTuk2"
+    (or {
+        (= "StepOverPiece" (id "LudecletiTuk2" Mover))
+        (= "StepOverPiece" (id "DelunletiTuk2" Mover))
+    })
+)
+
+(define "StepOverPieceIsUai1"
+    (or {
+        (= "StepOverPiece" (id "LudecletiUai1" Mover))
+        (= "StepOverPiece" (id "DelunletiUai1" Mover))
+    })
+)
+
+(define "StepOverPieceIsIo"
+    (or {
+        (= "StepOverPiece" (id "LudecletiIo" Mover))
+        (= "StepOverPiece" (id "DelunletiIo" Mover))
+    })
+)
+
+(define "NoOccupiedBetweenStepOverFinish"
+    (= 0 (count Sites in:(intersection (sites Between from:(var "StepOverVia") to:#1) (sites Occupied by:All))))
+)
+
+(define "HasStepOverFinish"
+    (>
+        (count Sites in:(difference #1 (union {(sites Occupied by:Mover) (sites Occupied by:Neutral) (sites {(from)})})))
+        0
+    )
+)
+
+(define "HasTam2StepOverFinish"
+    (or {
+        (is In (from) #1)
+        (>
+            (count Sites in:(difference #1 (sites Occupied by:All)))
+            0
+        )
+    })
+)
+
+(define "AnyPreStepOverFinish"
+    (> (count Sites in:(difference #1 (union {(sites Occupied by:Mover) (sites Occupied by:Neutral) (sites {(from)})}))) 0)
+)
+
+(define "PreAroundStepOverFinish"
+    (sites Direction from:(to) #1 distance:1)
+)
+
+(define "PreSlideStepOverFinish"
+    (sites Direction from:(to) #1 stop:(is Occupied (to)) stopIncluded:True distance:(count Rows))
+)
+
+(define "PreExact2StepOverFinish"
+    (difference (sites Direction from:(to) #1 distance:2) (sites Direction from:(to) #1 distance:1))
+)
+
+(define "PreMaun1HueStepOverFinish"
+    (difference (sites Direction from:(to) Diagonal distance:(count Rows)) (sites Direction from:(to) Diagonal distance:1))
+)
+
+(define "HasNuak1StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" (union {("PreSlideStepOverFinish" (directions {Forward Backward} of:All)) ("PreAroundStepOverFinish" (directions {Leftward Rightward} of:All)) ("PreExact2StepOverFinish" (directions {Leftward Rightward} of:All))}))
+        ("AnyPreStepOverFinish" ("PreSlideStepOverFinish" (directions Forward of:All)))
+    )
+)
+
+(define "HasKauk2StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" (union {("PreAroundStepOverFinish" Orthogonal) ("PreExact2StepOverFinish" (directions Forward of:All))}))
+        ("AnyPreStepOverFinish" ("PreAroundStepOverFinish" (directions Forward of:All)))
+    )
+)
+
+(define "HasGua2StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" ("PreSlideStepOverFinish" Diagonal))
+        ("AnyPreStepOverFinish" ("PreSlideStepOverFinish" Orthogonal))
+    )
+)
+
+(define "HasKaun1StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" ("PreExact2StepOverFinish" Diagonal))
+        ("AnyPreStepOverFinish" ("PreExact2StepOverFinish" Orthogonal))
+    )
+)
+
+(define "HasDau2StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" ("PreSlideStepOverFinish" Diagonal))
+        ("AnyPreStepOverFinish" ("PreAroundStepOverFinish" Diagonal))
+    )
+)
+
+(define "HasMaun1StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" "PreMaun1HueStepOverFinish")
+        ("AnyPreStepOverFinish" ("PreExact2StepOverFinish" Diagonal))
+    )
+)
+
+(define "HasKua2StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" ("PreSlideStepOverFinish" Orthogonal))
+        ("AnyPreStepOverFinish" (union {("PreSlideStepOverFinish" (directions {Forward Backward} of:All)) ("PreAroundStepOverFinish" (directions {Leftward Rightward} of:All))}))
+    )
+)
+
+(define "HasTuk2StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" ("PreSlideStepOverFinish" All))
+        ("AnyPreStepOverFinish" (union {("PreSlideStepOverFinish" (directions {Leftward Rightward} of:All)) ("PreAroundStepOverFinish" (directions {Forward Backward} of:All))}))
+    )
+)
+
+(define "HasUai1StepOverFinishFromVia"
+    (if ("InTamHue" (to))
+        ("AnyPreStepOverFinish" ("PreAroundStepOverFinish" All))
+        ("AnyPreStepOverFinish" ("PreAroundStepOverFinish" (directions {Forward Backward Leftward Rightward FL FR} of:All)))
+    )
+)
+
+(define "HasAnyStepOverFinishFromVia"
+    (if "MovingPieceIsNuak1"
+        "HasNuak1StepOverFinishFromVia"
+        (if "MovingPieceIsKauk2"
+            "HasKauk2StepOverFinishFromVia"
+            (if "MovingPieceIsGua2"
+                "HasGua2StepOverFinishFromVia"
+                (if "MovingPieceIsKaun1"
+                    "HasKaun1StepOverFinishFromVia"
+                    (if "MovingPieceIsDau2"
+                        "HasDau2StepOverFinishFromVia"
+                        (if "MovingPieceIsMaun1"
+                            "HasMaun1StepOverFinishFromVia"
+                            (if "MovingPieceIsKua2"
+                                "HasKua2StepOverFinishFromVia"
+                                (if "MovingPieceIsTuk2"
+                                    "HasTuk2StepOverFinishFromVia"
+                                    (if "MovingPieceIsUai1"
+                                        "HasUai1StepOverFinishFromVia"
+                                        (if "MovingPieceIsIo"
+                                            ("AnyPreStepOverFinish" ("PreAroundStepOverFinish" All))
+                                            False
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+)
+
+(define "AroundStepOverFinish"
+    (sites Around (to) #1)
+)
+
+(define "LineStepOverFinish"
+    (sites {(ahead (to) (directions Cell from:(from) to:(to)))})
+)
+
+(define "SlideStepOverFinish"
+    (sites Direction from:(to) #1 stop:(is Occupied (to)) stopIncluded:True distance:(count Rows))
+)
+
+(define "Exact2StepOverFinish"
+    (difference (sites Direction from:(to) #1 distance:2) (sites Direction from:(to) #1 distance:1))
+)
+
+(define "Maun1HueStepOverFinish"
+    (difference (sites Direction from:(to) Diagonal distance:(count Rows)) (sites Direction from:(to) Diagonal distance:1))
+)
+
+(define "FinishStepOver"
+    ("WithWaterEntryCheck"
+        (move
+            (from (var "StepOverVia") level:(topLevel at:(var "StepOverVia")))
+            (to #1 if:(and {
+                ("CanLandAt" (to))
+                (!= (to) (var "StepOverOrigin"))
+                ("NoOccupiedBetweenStepOverFinish" (to))
+            }) "CapturePiece")
+            (then
+                (and {
+                    (set Var "StepOverPending" 0)
+                    (set Var "StepOverPips" (- 0 1))
+                    "ClearLastTam2Move"
+                })
+            )
+        )
+    )
+)
+
+(define "FinishStepOverHop"
+    ("WithWaterEntryCheck"
+        (move
+            (from (var "StepOverVia") level:(topLevel at:(var "StepOverVia")))
+            (to #1 if:(and {
+                ("CanLandAt" (to))
+                (!= (to) (var "StepOverOrigin"))
+            }) "CapturePiece")
+            (then
+                (and {
+                    (set Var "StepOverPending" 0)
+                    (set Var "StepOverPips" (- 0 1))
+                    "ClearLastTam2Move"
+                })
+            )
+        )
+    )
+)
+
+(define "FinishStepOverStep"
+    ("FinishStepOver" (sites Direction from:(var "StepOverVia") #1 distance:1))
+)
+
+(define "FinishStepOverDirection"
+    ("FinishStepOver" (sites {(ahead (var "StepOverVia") (directions Cell from:(var "StepOverOrigin") to:(var "StepOverVia")))}))
+)
+
+(define "FinishStepOverSlide"
+    (move Select
+        (from (sites Direction from:(var "StepOverVia") #1 distance:1))
+        (then
+            (and {
+                (set Var "StepOverDirection" (last From))
+                (set Var "StepOverPips" (- 0 1))
+                (set Var "StepOverPending" (+ 100 (var "StepOverPending")))
+                (moveAgain)
+            })
+        )
+    )
+)
+
+(define "FinishStepOverSlideAs"
+    (move Select
+        (from (sites Direction from:(var "StepOverVia") #1 distance:1))
+        (then
+            (and {
+                (set Var "StepOverDirection" (last From))
+                (set Var "StepOverPips" (- 0 1))
+                (set Var "StepOverPending" #2)
+                (moveAgain)
+            })
+        )
+    )
+)
+
+(define "CancelStepOver"
+    (move
+        (from (var "StepOverVia") level:(topLevel at:(var "StepOverVia")))
+        (to (var "StepOverOrigin"))
+        (then
+            (and {
+                (set Var "StepOverPending" 0)
+                (set Var "StepOverPips" (- 0 1))
+                "ClearLastTam2Move"
+            })
+        )
+    )
+)
+
+(define "FinishOrCancelStepOver"
+    (priority
+        #1
+        "CancelStepOver"
+    )
+)
+
+(define "FinishStepOverNuak1"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver"
+            (or {
+                ("FinishStepOverSlideAs" (directions {Forward Backward} of:All) 109)
+                ("FinishStepOverStep" (directions {Leftward Rightward} of:All))
+                ("FinishStepOverExact2" (directions {Leftward Rightward} of:All))
+            })
+        )
+        ("FinishOrCancelStepOver" ("FinishStepOverSlideAs" (directions Forward of:All) 111))
+    )
+)
+
+(define "FinishStepOverKauk2"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver"
+            (or {
+                ("FinishStepOverStep" Orthogonal)
+                ("FinishStepOverExact2" (directions Forward of:All))
+            })
+        )
+        ("FinishOrCancelStepOver" ("FinishStepOverStep" (directions Forward of:All)))
+    )
+)
+
+(define "FinishStepOverGua2"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver" ("FinishStepOverSlideAs" Diagonal 108))
+        ("FinishOrCancelStepOver" ("FinishStepOverSlideAs" Orthogonal 107))
+    )
+)
+
+(define "FinishStepOverKaun1"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver" ("FinishStepOverExact2" Diagonal))
+        ("FinishOrCancelStepOver" ("FinishStepOverExact2Hop" Orthogonal))
+    )
+)
+
+(define "FinishStepOverDau2"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver" ("FinishStepOverSlideAs" Diagonal 108))
+        ("FinishOrCancelStepOver" ("FinishStepOverStep" Diagonal))
+    )
+)
+
+(define "FinishStepOverMaun1"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver" "FinishStepOverMaun1Hue")
+        ("FinishOrCancelStepOver" ("FinishStepOverExact2Hop" Diagonal))
+    )
+)
+
+(define "FinishStepOverKua2"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver" ("FinishStepOverSlideAs" Orthogonal 107))
+        ("FinishOrCancelStepOver"
+            (or {
+                ("FinishStepOverSlideAs" (directions {Forward Backward} of:All) 109)
+                ("FinishStepOverStep" (directions {Leftward Rightward} of:All))
+            })
+        )
+    )
+)
+
+(define "FinishStepOverTuk2"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver" ("FinishStepOverSlideAs" All 106))
+        ("FinishOrCancelStepOver"
+            (or {
+                ("FinishStepOverSlideAs" (directions {Leftward Rightward} of:All) 110)
+                ("FinishStepOverStep" (directions {Forward Backward} of:All))
+            })
+        )
+    )
+)
+
+(define "FinishStepOverUai1"
+    (if ("InTamHue" (var "StepOverVia"))
+        ("FinishOrCancelStepOver" ("FinishStepOverStep" All))
+        ("FinishOrCancelStepOver" ("FinishStepOverStep" (directions {Forward Backward Leftward Rightward FL FR} of:All)))
+    )
+)
+
+(define "FinishStepOverByPiece"
+    (if "StepOverPieceIsNuak1"
+        "FinishStepOverNuak1"
+        (if "StepOverPieceIsKauk2"
+            "FinishStepOverKauk2"
+            (if "StepOverPieceIsGua2"
+                "FinishStepOverGua2"
+                (if "StepOverPieceIsKaun1"
+                    "FinishStepOverKaun1"
+                    (if "StepOverPieceIsDau2"
+                        "FinishStepOverDau2"
+                        (if "StepOverPieceIsMaun1"
+                            "FinishStepOverMaun1"
+                            (if "StepOverPieceIsKua2"
+                                "FinishStepOverKua2"
+                                (if "StepOverPieceIsTuk2"
+                                    "FinishStepOverTuk2"
+                                    (if "StepOverPieceIsUai1"
+                                        "FinishStepOverUai1"
+                                        (if "StepOverPieceIsIo"
+                                            ("FinishOrCancelStepOver" ("FinishStepOverStep" All))
+                                            "CancelStepOver"
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+)
+
+(define "FinishStepOverDirectedSlide"
+    (if (< (var "StepOverPips") 0)
+        "ThrowStepOverSticks"
+        (or {
+            ("FinishStepOver"
+                (sites Direction
+                    from:(var "StepOverVia")
+                    (directions Cell from:(var "StepOverVia") to:(var "StepOverDirection"))
+                    stop:(is Occupied (to))
+                    stopIncluded:True
+                    distance:(var "StepOverPips")
+                )
+            )
+            "CancelStepOver"
+        })
+    )
+)
+
+(define "FinishStepOverExact2"
+    ("FinishStepOver" (difference (sites Direction from:(var "StepOverVia") #1 distance:2) (sites Direction from:(var "StepOverVia") #1 distance:1)))
+)
+
+(define "FinishStepOverExact2Hop"
+    ("FinishStepOverHop" (difference (sites Direction from:(var "StepOverVia") #1 distance:2) (sites Direction from:(var "StepOverVia") #1 distance:1)))
+)
+
+(define "FinishStepOverMaun1Hue"
+    (move Select
+        (from (sites Direction from:(var "StepOverVia") Diagonal distance:1))
+        (then
+            (and {
+                (set Var "StepOverDirection" (last From))
+                (set Var "StepOverPips" (- 0 1))
+                (set Var "StepOverPending" 116)
+                (moveAgain)
+            })
+        )
+    )
+)
+
+(define "FinishStepOverDirectedMaun1Hue"
+    (if (< (var "StepOverPips") 0)
+        "ThrowStepOverSticks"
+        (or {
+            ("FinishStepOverHop"
+                (intersection
+                    (difference
+                        (sites Direction
+                            from:(var "StepOverVia")
+                            (directions Cell from:(var "StepOverVia") to:(var "StepOverDirection"))
+                            distance:2
+                        )
+                        (sites Direction
+                            from:(var "StepOverVia")
+                            (directions Cell from:(var "StepOverVia") to:(var "StepOverDirection"))
+                            distance:1
+                        )
+                    )
+                    (sites Direction
+                        from:(var "StepOverVia")
+                        (directions Cell from:(var "StepOverVia") to:(var "StepOverDirection"))
+                        distance:(var "StepOverPips")
+                    )
+                )
+            )
+            ("FinishStepOver"
+                (difference
+                    (sites Direction
+                        from:(var "StepOverVia")
+                        (directions Cell from:(var "StepOverVia") to:(var "StepOverDirection"))
+                        stop:(is Occupied (to))
+                        stopIncluded:True
+                        distance:(var "StepOverPips")
+                    )
+                    (sites Direction
+                        from:(var "StepOverVia")
+                        (directions Cell from:(var "StepOverVia") to:(var "StepOverDirection"))
+                        distance:2
+                    )
+                )
+            )
+            "CancelStepOver"
+        })
+    )
+)
+
+(define "FinishPendingStepOver"
+    (if (= (var "StepOverPending") 21)
+        ("FinishOrCancelStepOver" "FinishFirstTam2StepOver")
+        (if (or {
+                (= (var "StepOverPending") 106)
+                (= (var "StepOverPending") 107)
+                (= (var "StepOverPending") 108)
+                (= (var "StepOverPending") 109)
+                (= (var "StepOverPending") 110)
+                (= (var "StepOverPending") 111)
+            })
+            "FinishStepOverDirectedSlide"
+            (if (= (var "StepOverPending") 116)
+                "FinishStepOverDirectedMaun1Hue"
+                "FinishStepOverByPiece"
+            )
+        )
+    )
+)
+
+(define "StepOverFixed"
+    (if False (move Pass))
+)
+
+(define "StepOverSlide"
+    (if False (move Pass))
+)
+
+(define "InTamHue"
+    (is In #1 (union (sites "TamHue") (sites Around (where "Tam2" Neutral) All)))
+)
+
+(define "Nuak1Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("SlideCapture" (directions {Forward Backward} of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions {Forward Backward} of:All) stop:(is Occupied (to)) stopIncluded:True) 9 ("SlideStepOverFinish" (directions {Forward Backward} of:All)))
+            ("StepOverSlide" (directions {Forward Backward} of:All))
+            ("StepCapture" (directions {Leftward Rightward} of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions {Leftward Rightward} of:All) distance:1) 14 "LineStepOverFinish")
+            ("StepOverFixed" (directions {Leftward Rightward} of:All) 1 1)
+            ("TwoStepNoHop" (directions {Leftward Rightward} of:All))
+            ("StepOverFixed" (directions {Leftward Rightward} of:All) 2 1)
+        })
+        (or {
+            ("SlideCapture" (directions Forward of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions Forward of:All) stop:(is Occupied (to)) stopIncluded:True) 11 ("SlideStepOverFinish" (directions Forward of:All)))
+            ("StepOverSlide" (directions Forward of:All))
+        })
+    )
+)
+
+(define "Kauk2Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("StepCapture" Orthogonal)
+            ("StepModeChoice" (sites Around (from) Orthogonal) 2 ("AroundStepOverFinish" Orthogonal))
+            ("StepOverFixed" Orthogonal 1 1)
+            ("TwoStepNoHop" (directions Forward of:All))
+            ("StepOverFixed" (directions Forward of:All) 2 1)
+        })
+        (or {
+            ("StepCapture" (directions Forward of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions Forward of:All) distance:1) 4 "LineStepOverFinish")
+            ("StepOverFixed" (directions Forward of:All) 1 1)
+        })
+    )
+)
+
+(define "Gua2Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("SlideCapture" Diagonal)
+            ("StepModeChoice" (sites Direction from:(from) Diagonal stop:(is Occupied (to)) stopIncluded:True) 8 ("SlideStepOverFinish" Diagonal))
+            ("StepOverSlide" Diagonal)
+        })
+        (or {
+            ("SlideCapture" Orthogonal)
+            ("StepModeChoice" (sites Direction from:(from) Orthogonal stop:(is Occupied (to)) stopIncluded:True) 7 ("SlideStepOverFinish" Orthogonal))
+            ("StepOverSlide" Orthogonal)
+        })
+    )
+)
+
+(define "Kaun1Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("TwoStepNoHop" Diagonal)
+            ("StepModeChoice" (difference (sites Direction from:(from) Diagonal distance:2) (sites Direction from:(from) Diagonal distance:1)) 17 ("Exact2StepOverFinish" Diagonal))
+            ("StepOverFixed" Diagonal 2 2)
+        })
+        (or {
+            ("TwoStepOrHop" Orthogonal)
+            ("StepModeChoice" (difference (sites Direction from:(from) Orthogonal distance:2) (sites Direction from:(from) Orthogonal distance:1)) 12 ("Exact2StepOverFinish" Orthogonal))
+            ("StepOverFixed" Orthogonal 2 2)
+        })
+    )
+)
+
+(define "Dau2Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("SlideCapture" Diagonal)
+            ("StepModeChoice" (sites Direction from:(from) Diagonal stop:(is Occupied (to)) stopIncluded:True) 8 ("SlideStepOverFinish" Diagonal))
+            ("StepOverSlide" Diagonal)
+        })
+        (or {
+            ("StepCapture" Diagonal)
+            ("StepModeChoice" (sites Around (from) Diagonal) 3 ("AroundStepOverFinish" Diagonal))
+            ("StepOverFixed" Diagonal 1 1)
+        })
+    )
+)
+
+(define "Maun1Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("TwoStepOrHop" Diagonal)
+            ("SlideCaptureMinDistance" Diagonal 2)
+            ("StepModeChoice"
+                (difference
+                    (sites Direction
+                        from:(from)
+                        Diagonal
+                        stop:(and {(is Occupied (to)) (> (count Steps (from) (to)) 1)})
+                        stopIncluded:True
+                    )
+                    (sites Direction from:(from) Diagonal distance:1)
+                )
+                16
+                "Maun1HueStepOverFinish"
+            )
+            ("StepOverSlide" Diagonal)
+        })
+        (or {
+            ("TwoStepOrHop" Diagonal)
+            ("StepModeChoice" (difference (sites Direction from:(from) Diagonal distance:2) (sites Direction from:(from) Diagonal distance:1)) 13 ("Exact2StepOverFinish" Diagonal))
+            ("StepOverFixed" Diagonal 2 2)
+        })
+    )
+)
+
+(define "Kua2Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("SlideCapture" Orthogonal)
+            ("StepModeChoice" (sites Direction from:(from) Orthogonal stop:(is Occupied (to)) stopIncluded:True) 7 ("SlideStepOverFinish" Orthogonal))
+            ("StepOverSlide" Orthogonal)
+        })
+        (or {
+            ("SlideCapture" (directions {Forward Backward} of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions {Forward Backward} of:All) stop:(is Occupied (to)) stopIncluded:True) 9 ("SlideStepOverFinish" (directions {Forward Backward} of:All)))
+            ("StepOverSlide" (directions {Forward Backward} of:All))
+            ("StepCapture" (directions {Leftward Rightward} of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions {Leftward Rightward} of:All) distance:1) 14 "LineStepOverFinish")
+            ("StepOverFixed" (directions {Leftward Rightward} of:All) 1 1)
+        })
+    )
+)
+
+(define "Tuk2Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("SlideCapture" All)
+            ("StepModeChoice" (sites Direction from:(from) All stop:(is Occupied (to)) stopIncluded:True) 6 ("SlideStepOverFinish" All))
+            ("StepOverSlide" All)
+        })
+        (or {
+            ("SlideCapture" (directions {Leftward Rightward} of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions {Leftward Rightward} of:All) stop:(is Occupied (to)) stopIncluded:True) 10 ("SlideStepOverFinish" (directions {Leftward Rightward} of:All)))
+            ("StepOverSlide" (directions {Leftward Rightward} of:All))
+            ("StepCapture" (directions {Forward Backward} of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions {Forward Backward} of:All) distance:1) 15 "LineStepOverFinish")
+            ("StepOverFixed" (directions {Forward Backward} of:All) 1 1)
+        })
+    )
+)
+
+(define "Uai1Move"
+    (if
+        ("InTamHue" (from))
+        (or {
+            ("StepCapture" All)
+            ("StepModeChoice" (sites Around (from) All) 1 ("AroundStepOverFinish" All))
+            ("StepOverFixed" All 1 1)
+        })
+        (or {
+            ("StepCapture" (directions {Forward Backward Leftward Rightward FL FR} of:All))
+            ("StepModeChoice" (sites Direction from:(from) (directions {Forward Backward Leftward Rightward FL FR} of:All) distance:1) 5 "LineStepOverFinish")
+            ("StepOverFixed" (directions {Forward Backward Leftward Rightward FL FR} of:All) 1 1)
+        })
+    )
+)
+
+(define "IoMove"
+    (or {
+        ("StepCapture" All)
+        ("StepModeChoice" (sites Around (from) All) 1 ("AroundStepOverFinish" All))
+        ("StepOverFixed" All 1 1)
+    })
+)
+
+(define "MarkFirstTam2MoveStarted"
+    (and {
+        (set Var "Tam2Origin" (last From))
+        (if
+            ("OpponentMovedTam2LastTurn")
+            (and {(set Var "Tam2Futile" 1) ("AddSituationRoleMover" -3)})
+            (set Var "Tam2Futile" 0)
+        )
+    })
+)
+
+(define "StartSecondTam2Move"
+    (and {
+        "MarkFirstTam2MoveStarted"
+        (set Var "Tam2Pending" 1)
+        (moveAgain)
+    })
+)
+
+(define "FinishSecondTam2Move"
+    (and {
+        (if (and {(= (last To) (var "Tam2Origin")) (!= (var "Tam2Futile") 1)}) ("AddSituationRoleMover" -3))
+        (set Var "Tam2Pending" 0)
+        (set Var "Tam2Futile" 0)
+        (set Var "LastTam2Mover" (mover))
+    })
+)
+
+(define "BeginTam2StepOver"
+    (move
+        (from (where "Tam2" Neutral))
+        (to #1 if:(and {
+            (!= (var "StepOverTurn") (count Turns))
+            (is Occupied (to))
+            ("HasTam2StepOverFinish" #3)
+        }))
+        stack:True
+        (then
+            (and {
+                (set Var "StepOverOrigin" (last From))
+                (set Var "StepOverVia" (last To))
+                (set Var "StepOverPending" #2)
+                (set Var "StepOverTurn" (count Turns))
+                #4
+                (moveAgain)
+            })
+        )
+    )
+)
+
+(define "FinishTam2StepOver"
+    (move
+        (from (var "StepOverVia") level:(topLevel at:(var "StepOverVia")))
+        (to #1 if:(is Empty (to)))
+        (then
+            (and {
+                (set Var "StepOverPending" 0)
+                #2
+            })
+        )
+    )
+)
+
+(define "FinishFirstTam2StepOver"
+    ("FinishTam2StepOver"
+        (sites Around (var "StepOverVia") All)
+        "FinishSecondTam2Move"
+    )
+)
+
+(define "OpponentMovedTam2LastTurn"
+    (and {
+        (!= (var "LastTam2Mover") 0)
+        (!= (var "LastTam2Mover") (mover))
+    })
+)
+
+(define "Tam2Move"
+    (if
+        (= (var "Tam2Pending") 0)
+        (or {
+            (move Step
+                (from (where "Tam2" Neutral))
+                All
+                (to if:(is Empty (to)))
+                (then "StartSecondTam2Move")
+            )
+            ("BeginTam2StepOver" (sites Around (where "Tam2" Neutral) All) 21 (sites Around (to) All) "MarkFirstTam2MoveStarted")
+        })
+        (or {
+            (move Step
+                (from (where "Tam2" Neutral))
+                All
+                (to if:(is Empty (to)))
+                (then "FinishSecondTam2Move")
+            )
+        })
+    )
+)
+
+(define "IsNuak1AtLastTo"
+    (or {
+        (= (what at:(last To)) (id "LudecletiNuak1" Mover))
+        (= (what at:(last To)) (id "DelunletiNuak1" Mover))
+    })
+)
+
+(define "WaterEntryAllowed"
+    (or {
+        (not (is In (last To) (sites "TamNua")))
+        ("IsNuak1AtLastTo")
+        (= (what at:(last To)) (id "Tam2" Neutral))
+        "WaterEntryStartInWater"
+        (is In (last From) (sites Hand Mover))
+        (>= (count Pips) 3)
+    })
+)
+
+(define "NeedsWaterRoll"
+    (and {
+        (is In (last To) (sites "TamNua"))
+        (not ("IsNuak1AtLastTo"))
+        (!= (what at:(last To)) (id "Tam2" Neutral))
+        (not "WaterEntryStartInWater")
+        (not (is In (last From) (sites Hand Mover)))
+    })
+)
+
+(define "CetkaikMove"
+    (if (> (var "StepOverPending") 0)
+        "FinishPendingStepOver"
+        (if "ArmedStepOverMode"
+            (priority
+                (forEach Piece)
+                "CancelArmedStepOver"
+            )
+            (if (= (var "Tam2Pending") 1)
+                "Tam2Move"
+                (or {
+                    (forEach Piece)
+                    "ArmStepOver"
+                    "Tam2Move"
+                    (move
+                        (from (sites Occupied by:Mover container:"Hand"))
+                        (to (sites Empty))
+                        (then "ClearLastTam2Move")
+                    )
+                })
+            )
+        )
+    )
+)
+
+(define "AfterCetkaikMove"
+    (if (> (var "StepOverPending") 0)
+        "ClearDeclarationPending"
+        (if "ArmedStepOverMode"
+            "ClearDeclarationPending"
+            (if (= (var "StepOverMode") 2)
+                (and {
+                    "ClearStepOverMode"
+                    "ClearDeclarationPending"
+                })
+                "AfterMoveDeclarationCheck"
+            )
+        )
+    )
+)
+
+(define "HC" (count Pieces in:(sites Occupied by:#1 container:"Hand" components:{#2})))
+
+(define "Nuak1Count" (+ ("HC" #1 "LudecletiNuak1") ("HC" #1 "DelunletiNuak1")))
+(define "Kauk2Count" (+ ("HC" #1 "LudecletiKauk2") ("HC" #1 "DelunletiKauk2")))
+(define "Gua2Count" (+ ("HC" #1 "LudecletiGua2") ("HC" #1 "DelunletiGua2")))
+(define "Kaun1Count" (+ ("HC" #1 "LudecletiKaun1") ("HC" #1 "DelunletiKaun1")))
+(define "Dau2Count" (+ ("HC" #1 "LudecletiDau2") ("HC" #1 "DelunletiDau2")))
+(define "Maun1Count" (+ ("HC" #1 "LudecletiMaun1") ("HC" #1 "DelunletiMaun1")))
+(define "Kua2Count" (+ ("HC" #1 "LudecletiKua2") ("HC" #1 "DelunletiKua2")))
+(define "Tuk2Count" (+ ("HC" #1 "LudecletiTuk2") ("HC" #1 "DelunletiTuk2")))
+(define "Uai1Count" (+ ("HC" #1 "LudecletiUai1") ("HC" #1 "DelunletiUai1")))
+(define "IoCount" (+ ("HC" #1 "LudecletiIo") ("HC" #1 "DelunletiIo")))
+
+(define "One" (if (>= #1 1) 1 0))
+(define "CapTwo" (if (>= #1 2) 2 #1))
+(define "CapFive" (if (>= #1 5) 5 #1))
+
+(define "OneEachFiveWithIo"
+    (>= (+ (+ (+ ("One" #2) ("One" #3)) (+ ("One" #4) ("One" #5))) (+ ("One" #6) ("IoCount" #1))) 5)
+)
+
+(define "OneEachThreeWithIo"
+    (>= (+ (+ ("One" #2) ("One" #3)) (+ ("One" #4) ("IoCount" #1))) 3)
+)
+
+(define "OneEachTwoWithIo"
+    (>= (+ (+ ("One" #2) ("One" #3)) ("IoCount" #1)) 2)
+)
+
+(define "OneAndTwoWithIo"
+    (>= (+ (+ ("One" #2) ("CapTwo" #3)) ("IoCount" #1)) 3)
+)
+
+(define "FiveSameKindWithIo"
+    (>= (+ ("CapFive" #2) ("IoCount" #1)) 5)
+)
+
+(define "AllKindsRole"
+    (and {
+        (>= ("Nuak1Count" #1) 1)
+        (>= ("Kauk2Count" #1) 1)
+        (>= ("Gua2Count" #1) 1)
+        (>= ("Kaun1Count" #1) 1)
+        (>= ("Dau2Count" #1) 1)
+        (>= ("Maun1Count" #1) 1)
+        (>= ("Kua2Count" #1) 1)
+        (>= ("Tuk2Count" #1) 1)
+        (>= ("Uai1Count" #1) 1)
+        (>= ("IoCount" #1) 1)
+    })
+)
+
+(define "AllKindsSameColour"
+    (or {
+        (and {
+            (>= ("HC" #1 "LudecletiNuak1") 1) (>= ("HC" #1 "LudecletiKauk2") 1)
+            (>= ("HC" #1 "LudecletiGua2") 1) (>= ("HC" #1 "LudecletiKaun1") 1)
+            (>= ("HC" #1 "LudecletiDau2") 1) (>= ("HC" #1 "LudecletiMaun1") 1)
+            (>= ("HC" #1 "LudecletiKua2") 1) (>= ("HC" #1 "LudecletiTuk2") 1)
+            (>= ("HC" #1 "LudecletiUai1") 1) (>= ("HC" #1 "LudecletiIo") 1)
+        })
+        (and {
+            (>= ("HC" #1 "DelunletiNuak1") 1) (>= ("HC" #1 "DelunletiKauk2") 1)
+            (>= ("HC" #1 "DelunletiGua2") 1) (>= ("HC" #1 "DelunletiKaun1") 1)
+            (>= ("HC" #1 "DelunletiDau2") 1) (>= ("HC" #1 "DelunletiMaun1") 1)
+            (>= ("HC" #1 "DelunletiKua2") 1) (>= ("HC" #1 "DelunletiTuk2") 1)
+            (>= ("HC" #1 "DelunletiUai1") 1) (>= ("HC" #1 "DelunletiIo") 1)
+        })
+    })
+)
+
+(define "AllFive"
+    (and {(>= ("HC" #1 #2) 1) (>= ("HC" #1 #3) 1) (>= ("HC" #1 #4) 1) (>= ("HC" #1 #5) 1) (>= ("HC" #1 #6) 1)})
+)
+
+(define "AllFiveWithIo"
+    (>= (+ (+ (+ ("One" ("HC" #1 #2)) ("One" ("HC" #1 #3))) (+ ("One" ("HC" #1 #4)) ("One" ("HC" #1 #5)))) (+ ("One" ("HC" #1 #6)) ("HC" #1 #7))) 5)
+)
+
+(define "SameColourThree"
+    (or {
+        (>= (+ (+ ("One" ("HC" #1 #2)) ("One" ("HC" #1 #3))) (+ ("One" ("HC" #1 #4)) ("HC" #1 "LudecletiIo"))) 3)
+        (>= (+ (+ ("One" ("HC" #1 #5)) ("One" ("HC" #1 #6))) (+ ("One" ("HC" #1 #7)) ("HC" #1 "DelunletiIo"))) 3)
+    })
+)
+
+(define "SameColourTwo"
+    (or {
+        (>= (+ (+ ("One" ("HC" #1 #2)) ("One" ("HC" #1 #3))) ("HC" #1 "LudecletiIo")) 2)
+        (>= (+ (+ ("One" ("HC" #1 #4)) ("One" ("HC" #1 #5))) ("HC" #1 "DelunletiIo")) 2)
+    })
+)
+
+(define "SameColourUai1TwoKauk2s"
+    (or {
+        (>= (+ (+ ("One" ("HC" #1 "LudecletiUai1")) ("CapTwo" ("HC" #1 "LudecletiKauk2"))) ("HC" #1 "LudecletiIo")) 3)
+        (>= (+ (+ ("One" ("HC" #1 "DelunletiUai1")) ("CapTwo" ("HC" #1 "DelunletiKauk2"))) ("HC" #1 "DelunletiIo")) 3)
+    })
+)
+
+(define "SameColourKaun1TwoKauk2s"
+    (or {
+        (>= (+ (+ ("One" ("HC" #1 "LudecletiKaun1")) ("CapTwo" ("HC" #1 "LudecletiKauk2"))) ("HC" #1 "LudecletiIo")) 3)
+        (>= (+ (+ ("One" ("HC" #1 "DelunletiKaun1")) ("CapTwo" ("HC" #1 "DelunletiKauk2"))) ("HC" #1 "DelunletiIo")) 3)
+    })
+)
+
+(define "SameColourFiveKauk2s"
+    (or {
+        (>= (+ ("CapFive" ("HC" #1 "LudecletiKauk2")) ("HC" #1 "LudecletiIo")) 5)
+        (>= (+ ("CapFive" ("HC" #1 "DelunletiKauk2")) ("HC" #1 "DelunletiIo")) 5)
+    })
+)
+
+(define "RoleAllKinds" (if ("AllKindsRole" #1) (+ 50 (if ("AllKindsSameColour" #1) 2 0)) 0))
+
+(define "RoleKua2Line"
+    (if ("OneEachFiveWithIo" #1 ("Kauk2Count" #1) ("Gua2Count" #1) ("Uai1Count" #1) ("Kua2Count" #1) ("Tuk2Count" #1))
+        (+ 10 (if (or {
+                ("AllFiveWithIo" #1 "LudecletiKauk2" "LudecletiGua2" "LudecletiUai1" "LudecletiKua2" "LudecletiTuk2" "LudecletiIo")
+                ("AllFiveWithIo" #1 "DelunletiKauk2" "DelunletiGua2" "DelunletiUai1" "DelunletiKua2" "DelunletiTuk2" "DelunletiIo")
+            }) 2 0))
+        0
+    )
+)
+
+(define "RoleCoreThree"
+    (if ("OneEachThreeWithIo" #1 ("Kua2Count" #1) ("Tuk2Count" #1) ("Uai1Count" #1))
+        (+ 7 (if ("SameColourThree" #1 "LudecletiKua2" "LudecletiTuk2" "LudecletiUai1" "DelunletiKua2" "DelunletiTuk2" "DelunletiUai1") 2 0))
+        0
+    )
+)
+
+(define "RoleMaun1Gua2Kauk2"
+    (if ("OneEachThreeWithIo" #1 ("Kauk2Count" #1) ("Gua2Count" #1) ("Maun1Count" #1))
+        (+ 5 (if ("SameColourThree" #1 "LudecletiKauk2" "LudecletiGua2" "LudecletiMaun1" "DelunletiKauk2" "DelunletiGua2" "DelunletiMaun1") 2 0))
+        0
+    )
+)
+
+(define "RoleVehicleLine"
+    (if ("OneEachThreeWithIo" #1 ("Nuak1Count" #1) ("Kaun1Count" #1) ("Maun1Count" #1))
+        (+ 5 (if ("SameColourThree" #1 "LudecletiNuak1" "LudecletiKaun1" "LudecletiMaun1" "DelunletiNuak1" "DelunletiKaun1" "DelunletiMaun1") 2 0))
+        0
+    )
+)
+
+(define "RoleIo" (if (>= ("IoCount" #1) 1) 5 0))
+
+(define "RoleBeasts"
+    (if ("OneEachTwoWithIo" #1 ("Dau2Count" #1) ("Maun1Count" #1))
+        (+ 3 (if ("SameColourTwo" #1 "LudecletiDau2" "LudecletiMaun1" "DelunletiDau2" "DelunletiMaun1") 2 0))
+        0
+    )
+)
+
+(define "RoleUai1TwoKauk2s"
+    (if ("OneAndTwoWithIo" #1 ("Uai1Count" #1) ("Kauk2Count" #1))
+        (+ 3 (if ("SameColourUai1TwoKauk2s" #1) 2 0))
+        0
+    )
+)
+
+(define "RoleKaun1TwoKauk2s"
+    (if ("OneAndTwoWithIo" #1 ("Kaun1Count" #1) ("Kauk2Count" #1))
+        (+ 3 (if ("SameColourKaun1TwoKauk2s" #1) 2 0))
+        0
+    )
+)
+
+(define "RoleFiveKauk2s"
+    (if ("FiveSameKindWithIo" #1 ("Kauk2Count" #1))
+        (+ 3 (if ("SameColourFiveKauk2s" #1) 2 0))
+        0
+    )
+)
+
+(define "RoleScoreA" (+ ("RoleAllKinds" #1) ("RoleKua2Line" #1)))
+(define "RoleScoreB" (+ ("RoleCoreThree" #1) ("RoleMaun1Gua2Kauk2" #1)))
+(define "RoleScoreC" (+ ("RoleVehicleLine" #1) ("RoleIo" #1)))
+(define "RoleScoreD" (+ ("RoleBeasts" #1) ("RoleUai1TwoKauk2s" #1)))
+(define "RoleScoreE" (+ ("RoleKaun1TwoKauk2s" #1) ("RoleFiveKauk2s" #1)))
+(define "RoleScore" (+ (+ ("RoleScoreA" #1) ("RoleScoreB" #1)) (+ (+ ("RoleScoreC" #1) ("RoleScoreD" #1)) ("RoleScoreE" #1))))
+
+(define "CurrentClaim"
+    (* (if (< (var "SeasonRate") 1) 1 (var "SeasonRate")) (+ ("RoleScore" #1) #2))
+)
+
+(define "ClaimTransfer"
+    (if (> (var "PendingClaim") 0)
+        (min (var "PendingClaim") (score #2))
+        (- 0 (min (- 0 (var "PendingClaim")) (score #1)))
+    )
+)
+
+(define "ApplyClaimTransfer"
+    (set Var "ScoreTransfer" ("ClaimTransfer" #1 #2)
+        (then
+            (set Score #1 (+ (score #1) (var "ScoreTransfer"))
+                (then
+                    (set Score #2 (- (score #2) (var "ScoreTransfer"))
+                        (then "AfterClaimTransfer")
+                    )
+                )
+            )
+        )
+    )
+)
+
+(define "AfterClaimTransfer"
+    (set Var "StartNextSeason" (if "ShouldStartNextSeason" 1 0)
+        (then
+            (and {
+                "FinishSeason"
+                (if (= (var "StartNextSeason") 1) ("ResetSeason"))
+            })
+        )
+    )
+)
+
+(define "ClearDeclarationPending"
+    (set Var "DeclarationPending" 0)
+)
+
+(define "AfterMoveDeclarationCheck"
+    (if (is Mover P1)
+        (if (or {
+                (> ("RoleScore" P1) (var "KnownRoleScoreP1"))
+                (= (var "NewSituationRoleP1") 1)
+            })
+            (and {
+                (set Var "DeclarationPending" 1)
+                (moveAgain)
+            })
+            (and {
+                (set Var "KnownRoleScoreP1" ("RoleScore" P1))
+                "ClearDeclarationPending"
+            })
+        )
+        (if (or {
+                (> ("RoleScore" P2) (var "KnownRoleScoreP2"))
+                (= (var "NewSituationRoleP2") 1)
+            })
+            (and {
+                (set Var "DeclarationPending" 2)
+                (moveAgain)
+            })
+            (and {
+                (set Var "KnownRoleScoreP2" ("RoleScore" P2))
+                "ClearDeclarationPending"
+            })
+        )
+    )
+)
+
+(define "DeclarationChoice"
+    (if (is Mover P1)
+        (or {"EndSeasonDeclarationP1" "ContinueDeclarationP1"})
+        (or {"EndSeasonDeclarationP2" "ContinueDeclarationP2"})
+    )
+)
+
+(define "EndSeasonDeclarationP1"
+    (move Select
+        (from (handSite P1 30))
+        (then
+            (set Var "PendingClaim" ("CurrentClaim" P1 (var "SituationRoleScoreP1"))
+                (then
+                    (and {
+                        "ClearLastTam2Move"
+                        "ClearDeclarationPending"
+                        ("ApplyClaimTransfer" P1 P2)
+                    })
+                )
+            )
+        )
+    )
+)
+
+(define "EndSeasonDeclarationP2"
+    (move Select
+        (from (handSite P2 30))
+        (then
+            (set Var "PendingClaim" ("CurrentClaim" P2 (var "SituationRoleScoreP2"))
+                (then
+                    (and {
+                        "ClearLastTam2Move"
+                        "ClearDeclarationPending"
+                        ("ApplyClaimTransfer" P2 P1)
+                    })
+                )
+            )
+        )
+    )
+)
+
+(define "ContinueDeclarationP1"
+    (move Select
+        (from (handSite P1 31))
+        (then
+            (and {
+                "ClearLastTam2Move"
+                "ClearDeclarationPending"
+                (set Var "KnownRoleScoreP1" ("RoleScore" P1))
+                (set Var "NewSituationRoleP1" 0)
+                (set Var "SeasonRate" (* 2 (if (< (var "SeasonRate") 1) 1 (var "SeasonRate"))))
+            })
+        )
+    )
+)
+
+(define "ContinueDeclarationP2"
+    (move Select
+        (from (handSite P2 31))
+        (then
+            (and {
+                "ClearLastTam2Move"
+                "ClearDeclarationPending"
+                (set Var "KnownRoleScoreP2" ("RoleScore" P2))
+                (set Var "NewSituationRoleP2" 0)
+                (set Var "SeasonRate" (* 2 (if (< (var "SeasonRate") 1) 1 (var "SeasonRate"))))
+            })
+        )
+    )
+)
+
+(define "FinishSeason"
+    (and {
+        (set Var "Season" (+ 1 (var "Season")))
+        (set Value P1 1)
+        (set Value P2 1)
+        (set Var "KnownRoleScoreP1" 0)
+        (set Var "KnownRoleScoreP2" 0)
+        (set Var "SituationRoleScoreP1" 0)
+        (set Var "SituationRoleScoreP2" 0)
+        (set Var "NewSituationRoleP1" 0)
+        (set Var "NewSituationRoleP2" 0)
+        (set Var "SeasonRate" 1)
+        (set Var "PendingClaim" 0)
+        (set Var "ScoreTransfer" 0)
+        "ClearLastTam2Move"
+        (set Var "Tam2Pending" 0)
+        (set Var "Tam2Futile" 0)
+        (set Var "StepOverPending" 0)
+        (set Var "StepOverTurn" (- 0 1))
+        (set Var "StepOverOrigin" (- 0 1))
+        (set Var "StepOverVia" (- 0 1))
+        (set Var "StepOverDirection" (- 0 1))
+        (set Var "StepOverPips" (- 0 1))
+        (set Var "StepOverMode" 0)
+        (set Var "StepOverArmedOrigin" (- 0 1))
+        "ClearDeclarationPending"
+    })
+)
+
+(define "ShouldStartNextSeason"
+    (and {
+        (< (+ 1 (var "Season")) <Seasons:num>)
+        (< (score P1) 40)
+        (< (score P2) 40)
+        (> (score P1) 0)
+        (> (score P2) 0)
+    })
+)
+
+(define "DeclarationMarkers"
+    (and {
+        (add (piece (id "TaXot1Marker" Neutral)) (to (handSite P1 30)))
+        (add (piece (id "TyMok1Marker" Neutral)) (to (handSite P1 31)))
+        (add (piece (id "TaXot1Marker" Neutral)) (to (handSite P2 30)))
+        (add (piece (id "TyMok1Marker" Neutral)) (to (handSite P2 31)))
+    })
+)
+
+(define "InitialPosition"
+    (and {
+        (add (piece (id "DelunletiKua2" P2)) (to (sites "KA")))
+        (add (piece (id "DelunletiMaun1" P2)) (to (sites "LA")))
+        (add (piece (id "DelunletiKaun1" P2)) (to (sites "NA")))
+        (add (piece (id "DelunletiUai1" P2)) (to (sites "TA")))
+        (add (piece (id "LudecletiIo" P2)) (to (sites "ZA")))
+        (add (piece (id "LudecletiUai1" P2)) (to (sites "XA")))
+        (add (piece (id "LudecletiKaun1" P2)) (to (sites "CA")))
+        (add (piece (id "LudecletiMaun1" P2)) (to (sites "MA")))
+        (add (piece (id "LudecletiKua2" P2)) (to (sites "PA")))
+        (add (piece (id "LudecletiTuk2" P2)) (to (sites "KE")))
+        (add (piece (id "LudecletiGua2" P2)) (to (sites "LE")))
+        (add (piece (id "LudecletiDau2" P2)) (to (sites "TE")))
+        (add (piece (id "DelunletiDau2" P2)) (to (sites "XE")))
+        (add (piece (id "DelunletiGua2" P2)) (to (sites "ME")))
+        (add (piece (id "DelunletiTuk2" P2)) (to (sites "PE")))
+        (add (piece (id "DelunletiKauk2" P2)) (to (sites "KI")))
+        (add (piece (id "LudecletiKauk2" P2)) (to (sites "LI")))
+        (add (piece (id "DelunletiKauk2" P2)) (to (sites "NI")))
+        (add (piece (id "LudecletiKauk2" P2)) (to (sites "TI")))
+        (add (piece (id "LudecletiNuak1" P2)) (to (sites "ZI")))
+        (add (piece (id "LudecletiKauk2" P2)) (to (sites "XI")))
+        (add (piece (id "DelunletiKauk2" P2)) (to (sites "CI")))
+        (add (piece (id "LudecletiKauk2" P2)) (to (sites "MI")))
+        (add (piece (id "DelunletiKauk2" P2)) (to (sites "PI")))
+        (add (piece (id "Tam2" Neutral)) (to (sites "ZO")))
+        (add (piece (id "DelunletiKauk2" P1)) (to (sites "KAI")))
+        (add (piece (id "LudecletiKauk2" P1)) (to (sites "LAI")))
+        (add (piece (id "DelunletiKauk2" P1)) (to (sites "NAI")))
+        (add (piece (id "LudecletiKauk2" P1)) (to (sites "TAI")))
+        (add (piece (id "DelunletiNuak1" P1)) (to (sites "ZAI")))
+        (add (piece (id "LudecletiKauk2" P1)) (to (sites "XAI")))
+        (add (piece (id "DelunletiKauk2" P1)) (to (sites "CAI")))
+        (add (piece (id "LudecletiKauk2" P1)) (to (sites "MAI")))
+        (add (piece (id "DelunletiKauk2" P1)) (to (sites "PAI")))
+        (add (piece (id "DelunletiTuk2" P1)) (to (sites "KAU")))
+        (add (piece (id "DelunletiGua2" P1)) (to (sites "LAU")))
+        (add (piece (id "DelunletiDau2" P1)) (to (sites "TAU")))
+        (add (piece (id "LudecletiDau2" P1)) (to (sites "XAU")))
+        (add (piece (id "LudecletiGua2" P1)) (to (sites "MAU")))
+        (add (piece (id "LudecletiTuk2" P1)) (to (sites "PAU")))
+        (add (piece (id "LudecletiKua2" P1)) (to (sites "KIA")))
+        (add (piece (id "LudecletiMaun1" P1)) (to (sites "LIA")))
+        (add (piece (id "LudecletiKaun1" P1)) (to (sites "NIA")))
+        (add (piece (id "LudecletiUai1" P1)) (to (sites "TIA")))
+        (add (piece (id "DelunletiIo" P1)) (to (sites "ZIA")))
+        (add (piece (id "DelunletiUai1" P1)) (to (sites "XIA")))
+        (add (piece (id "DelunletiKaun1" P1)) (to (sites "CIA")))
+        (add (piece (id "DelunletiMaun1" P1)) (to (sites "MIA")))
+        (add (piece (id "DelunletiKua2" P1)) (to (sites "PIA")))
+    })
+)
+
+(define "ResetSeason"
+    (and {
+        (forEach Site (sites Occupied by:All container:"Board") (remove (site) count:(size Stack at:(site))))
+        (forEach Site (sites Hand P1) (remove (site) count:(size Stack at:(site))))
+        (forEach Site (sites Hand P2) (remove (site) count:(size Stack at:(site))))
+        (set Var "StarterChosen" 0)
+        (set Var "StarterStage" 0)
+        (set Var "StarterP1" 0)
+        ("InitialPosition")
+        "DeclarationMarkers"
+        (set Var "StartNextSeason" 0)
+        (set NextPlayer (player 1))
+    })
+)
+
+(game "Cetkaik"
+    (players {(player N) (player S)})
+    (equipment {
+        (board (square 9))
+        (hand Each size:32)
+        ("StickDice" 5)
+
+        (piece "LudecletiNuak1" Each "Nuak1Move")
+        (piece "DelunletiNuak1" Each "Nuak1Move")
+        (piece "LudecletiKauk2" Each "Kauk2Move")
+        (piece "DelunletiKauk2" Each "Kauk2Move")
+        (piece "LudecletiGua2" Each "Gua2Move")
+        (piece "DelunletiGua2" Each "Gua2Move")
+        (piece "LudecletiKaun1" Each "Kaun1Move")
+        (piece "DelunletiKaun1" Each "Kaun1Move")
+        (piece "LudecletiDau2" Each "Dau2Move")
+        (piece "DelunletiDau2" Each "Dau2Move")
+        (piece "LudecletiMaun1" Each "Maun1Move")
+        (piece "DelunletiMaun1" Each "Maun1Move")
+        (piece "LudecletiKua2" Each "Kua2Move")
+        (piece "DelunletiKua2" Each "Kua2Move")
+        (piece "LudecletiTuk2" Each "Tuk2Move")
+        (piece "DelunletiTuk2" Each "Tuk2Move")
+        (piece "LudecletiUai1" Each "Uai1Move")
+        (piece "DelunletiUai1" Each "Uai1Move")
+        (piece "LudecletiIo" Each "IoMove")
+        (piece "DelunletiIo" Each "IoMove")
+        (piece "TaXot1Marker" Neutral)
+        (piece "TyMok1Marker" Neutral)
+        (piece "Tam2" Neutral (move Step All (to if:(is Empty (to)))))
+
+        (map "Where" {
+            (pair (id "LudecletiNuak1" P1) (handSite P2 0)) (pair (id "LudecletiNuak1" P2) (handSite P1 0))
+            (pair (id "DelunletiNuak1" P1) (handSite P2 1)) (pair (id "DelunletiNuak1" P2) (handSite P1 1))
+            (pair (id "LudecletiKauk2" P1) (handSite P2 2)) (pair (id "LudecletiKauk2" P2) (handSite P1 2))
+            (pair (id "DelunletiKauk2" P1) (handSite P2 3)) (pair (id "DelunletiKauk2" P2) (handSite P1 3))
+            (pair (id "LudecletiGua2" P1) (handSite P2 4)) (pair (id "LudecletiGua2" P2) (handSite P1 4))
+            (pair (id "DelunletiGua2" P1) (handSite P2 5)) (pair (id "DelunletiGua2" P2) (handSite P1 5))
+            (pair (id "LudecletiKaun1" P1) (handSite P2 6)) (pair (id "LudecletiKaun1" P2) (handSite P1 6))
+            (pair (id "DelunletiKaun1" P1) (handSite P2 7)) (pair (id "DelunletiKaun1" P2) (handSite P1 7))
+            (pair (id "LudecletiDau2" P1) (handSite P2 8)) (pair (id "LudecletiDau2" P2) (handSite P1 8))
+            (pair (id "DelunletiDau2" P1) (handSite P2 9)) (pair (id "DelunletiDau2" P2) (handSite P1 9))
+            (pair (id "LudecletiMaun1" P1) (handSite P2 10)) (pair (id "LudecletiMaun1" P2) (handSite P1 10))
+            (pair (id "DelunletiMaun1" P1) (handSite P2 11)) (pair (id "DelunletiMaun1" P2) (handSite P1 11))
+            (pair (id "LudecletiKua2" P1) (handSite P2 12)) (pair (id "LudecletiKua2" P2) (handSite P1 12))
+            (pair (id "DelunletiKua2" P1) (handSite P2 13)) (pair (id "DelunletiKua2" P2) (handSite P1 13))
+            (pair (id "LudecletiTuk2" P1) (handSite P2 14)) (pair (id "LudecletiTuk2" P2) (handSite P1 14))
+            (pair (id "DelunletiTuk2" P1) (handSite P2 15)) (pair (id "DelunletiTuk2" P2) (handSite P1 15))
+            (pair (id "LudecletiUai1" P1) (handSite P2 16)) (pair (id "LudecletiUai1" P2) (handSite P1 16))
+            (pair (id "DelunletiUai1" P1) (handSite P2 17)) (pair (id "DelunletiUai1" P2) (handSite P1 17))
+            (pair (id "LudecletiIo" P1) (handSite P2 18)) (pair (id "LudecletiIo" P2) (handSite P1 18))
+            (pair (id "DelunletiIo" P1) (handSite P2 19)) (pair (id "DelunletiIo" P2) (handSite P1 19))
+        })
+        (map "Captured" {
+            (pair (id "LudecletiNuak1" P1) (id "LudecletiNuak1" P2)) (pair (id "LudecletiNuak1" P2) (id "LudecletiNuak1" P1))
+            (pair (id "DelunletiNuak1" P1) (id "DelunletiNuak1" P2)) (pair (id "DelunletiNuak1" P2) (id "DelunletiNuak1" P1))
+            (pair (id "LudecletiKauk2" P1) (id "LudecletiKauk2" P2)) (pair (id "LudecletiKauk2" P2) (id "LudecletiKauk2" P1))
+            (pair (id "DelunletiKauk2" P1) (id "DelunletiKauk2" P2)) (pair (id "DelunletiKauk2" P2) (id "DelunletiKauk2" P1))
+            (pair (id "LudecletiGua2" P1) (id "LudecletiGua2" P2)) (pair (id "LudecletiGua2" P2) (id "LudecletiGua2" P1))
+            (pair (id "DelunletiGua2" P1) (id "DelunletiGua2" P2)) (pair (id "DelunletiGua2" P2) (id "DelunletiGua2" P1))
+            (pair (id "LudecletiKaun1" P1) (id "LudecletiKaun1" P2)) (pair (id "LudecletiKaun1" P2) (id "LudecletiKaun1" P1))
+            (pair (id "DelunletiKaun1" P1) (id "DelunletiKaun1" P2)) (pair (id "DelunletiKaun1" P2) (id "DelunletiKaun1" P1))
+            (pair (id "LudecletiDau2" P1) (id "LudecletiDau2" P2)) (pair (id "LudecletiDau2" P2) (id "LudecletiDau2" P1))
+            (pair (id "DelunletiDau2" P1) (id "DelunletiDau2" P2)) (pair (id "DelunletiDau2" P2) (id "DelunletiDau2" P1))
+            (pair (id "LudecletiMaun1" P1) (id "LudecletiMaun1" P2)) (pair (id "LudecletiMaun1" P2) (id "LudecletiMaun1" P1))
+            (pair (id "DelunletiMaun1" P1) (id "DelunletiMaun1" P2)) (pair (id "DelunletiMaun1" P2) (id "DelunletiMaun1" P1))
+            (pair (id "LudecletiKua2" P1) (id "LudecletiKua2" P2)) (pair (id "LudecletiKua2" P2) (id "LudecletiKua2" P1))
+            (pair (id "DelunletiKua2" P1) (id "DelunletiKua2" P2)) (pair (id "DelunletiKua2" P2) (id "DelunletiKua2" P1))
+            (pair (id "LudecletiTuk2" P1) (id "LudecletiTuk2" P2)) (pair (id "LudecletiTuk2" P2) (id "LudecletiTuk2" P1))
+            (pair (id "DelunletiTuk2" P1) (id "DelunletiTuk2" P2)) (pair (id "DelunletiTuk2" P2) (id "DelunletiTuk2" P1))
+            (pair (id "LudecletiUai1" P1) (id "LudecletiUai1" P2)) (pair (id "LudecletiUai1" P2) (id "LudecletiUai1" P1))
+            (pair (id "DelunletiUai1" P1) (id "DelunletiUai1" P2)) (pair (id "DelunletiUai1" P2) (id "DelunletiUai1" P1))
+            (pair (id "LudecletiIo" P1) (id "LudecletiIo" P2)) (pair (id "LudecletiIo" P2) (id "LudecletiIo" P1))
+            (pair (id "DelunletiIo" P1) (id "DelunletiIo" P2)) (pair (id "DelunletiIo" P2) (id "DelunletiIo" P1))
+        })
+
+        (regions "KA" (sites {"A9"}))
+        (regions "LA" (sites {"B9"}))
+        (regions "NA" (sites {"C9"}))
+        (regions "TA" (sites {"D9"}))
+        (regions "ZA" (sites {"E9"}))
+        (regions "XA" (sites {"F9"}))
+        (regions "CA" (sites {"G9"}))
+        (regions "MA" (sites {"H9"}))
+        (regions "PA" (sites {"I9"}))
+        (regions "KE" (sites {"A8"}))
+        (regions "LE" (sites {"B8"}))
+        (regions "NE" (sites {"C8"}))
+        (regions "TE" (sites {"D8"}))
+        (regions "ZE" (sites {"E8"}))
+        (regions "XE" (sites {"F8"}))
+        (regions "CE" (sites {"G8"}))
+        (regions "ME" (sites {"H8"}))
+        (regions "PE" (sites {"I8"}))
+        (regions "KI" (sites {"A7"}))
+        (regions "LI" (sites {"B7"}))
+        (regions "NI" (sites {"C7"}))
+        (regions "TI" (sites {"D7"}))
+        (regions "ZI" (sites {"E7"}))
+        (regions "XI" (sites {"F7"}))
+        (regions "CI" (sites {"G7"}))
+        (regions "MI" (sites {"H7"}))
+        (regions "PI" (sites {"I7"}))
+        (regions "KU" (sites {"A6"}))
+        (regions "LU" (sites {"B6"}))
+        (regions "NU" (sites {"C6"}))
+        (regions "TU" (sites {"D6"}))
+        (regions "ZU" (sites {"E6"}))
+        (regions "XU" (sites {"F6"}))
+        (regions "CU" (sites {"G6"}))
+        (regions "MU" (sites {"H6"}))
+        (regions "PU" (sites {"I6"}))
+        (regions "KO" (sites {"A5"}))
+        (regions "LO" (sites {"B5"}))
+        (regions "NO" (sites {"C5"}))
+        (regions "TO" (sites {"D5"}))
+        (regions "ZO" (sites {"E5"}))
+        (regions "XO" (sites {"F5"}))
+        (regions "CO" (sites {"G5"}))
+        (regions "MO" (sites {"H5"}))
+        (regions "PO" (sites {"I5"}))
+        (regions "KY" (sites {"A4"}))
+        (regions "LY" (sites {"B4"}))
+        (regions "NY" (sites {"C4"}))
+        (regions "TY" (sites {"D4"}))
+        (regions "ZY" (sites {"E4"}))
+        (regions "XY" (sites {"F4"}))
+        (regions "CY" (sites {"G4"}))
+        (regions "MY" (sites {"H4"}))
+        (regions "PY" (sites {"I4"}))
+        (regions "KAI" (sites {"A3"}))
+        (regions "LAI" (sites {"B3"}))
+        (regions "NAI" (sites {"C3"}))
+        (regions "TAI" (sites {"D3"}))
+        (regions "ZAI" (sites {"E3"}))
+        (regions "XAI" (sites {"F3"}))
+        (regions "CAI" (sites {"G3"}))
+        (regions "MAI" (sites {"H3"}))
+        (regions "PAI" (sites {"I3"}))
+        (regions "KAU" (sites {"A2"}))
+        (regions "LAU" (sites {"B2"}))
+        (regions "NAU" (sites {"C2"}))
+        (regions "TAU" (sites {"D2"}))
+        (regions "ZAU" (sites {"E2"}))
+        (regions "XAU" (sites {"F2"}))
+        (regions "CAU" (sites {"G2"}))
+        (regions "MAU" (sites {"H2"}))
+        (regions "PAU" (sites {"I2"}))
+        (regions "KIA" (sites {"A1"}))
+        (regions "LIA" (sites {"B1"}))
+        (regions "NIA" (sites {"C1"}))
+        (regions "TIA" (sites {"D1"}))
+        (regions "ZIA" (sites {"E1"}))
+        (regions "XIA" (sites {"F1"}))
+        (regions "CIA" (sites {"G1"}))
+        (regions "MIA" (sites {"H1"}))
+        (regions "PIA" (sites {"I1"}))
+
+        (regions "TamHue" (union {(sites "NI") (sites "CI") (sites "TU") (sites "XU") (sites "ZO") (sites "TY") (sites "XY") (sites "NAI") (sites "CAI")}))
+        (regions "TamNua" (union {(sites "ZI") (sites "NO") (sites "TO") (sites "ZO") (sites "XO") (sites "CO") (sites "ZAI")}))
+        (regions "TamZo" (union {(sites "ZO")}))
+    })
+    (rules
+        (start {
+            (set Score Each 20)
+            (place "DelunletiKua22" (sites "KA"))
+            (place "DelunletiMaun12" (sites "LA"))
+            (place "DelunletiKaun12" (sites "NA"))
+            (place "DelunletiUai12" (sites "TA"))
+            (place "LudecletiIo2" (sites "ZA"))
+            (place "LudecletiUai12" (sites "XA"))
+            (place "LudecletiKaun12" (sites "CA"))
+            (place "LudecletiMaun12" (sites "MA"))
+            (place "LudecletiKua22" (sites "PA"))
+            (place "LudecletiTuk22" (sites "KE"))
+            (place "LudecletiGua22" (sites "LE"))
+            (place "LudecletiDau22" (sites "TE"))
+            (place "DelunletiDau22" (sites "XE"))
+            (place "DelunletiGua22" (sites "ME"))
+            (place "DelunletiTuk22" (sites "PE"))
+            (place "DelunletiKauk22" (sites "KI"))
+            (place "LudecletiKauk22" (sites "LI"))
+            (place "DelunletiKauk22" (sites "NI"))
+            (place "LudecletiKauk22" (sites "TI"))
+            (place "LudecletiNuak12" (sites "ZI"))
+            (place "LudecletiKauk22" (sites "XI"))
+            (place "DelunletiKauk22" (sites "CI"))
+            (place "LudecletiKauk22" (sites "MI"))
+            (place "DelunletiKauk22" (sites "PI"))
+            (place "Tam20" (sites "ZO"))
+            (place "DelunletiKauk21" (sites "KAI"))
+            (place "LudecletiKauk21" (sites "LAI"))
+            (place "DelunletiKauk21" (sites "NAI"))
+            (place "LudecletiKauk21" (sites "TAI"))
+            (place "DelunletiNuak11" (sites "ZAI"))
+            (place "LudecletiKauk21" (sites "XAI"))
+            (place "DelunletiKauk21" (sites "CAI"))
+            (place "LudecletiKauk21" (sites "MAI"))
+            (place "DelunletiKauk21" (sites "PAI"))
+            (place "DelunletiTuk21" (sites "KAU"))
+            (place "DelunletiGua21" (sites "LAU"))
+            (place "DelunletiDau21" (sites "TAU"))
+            (place "LudecletiDau21" (sites "XAU"))
+            (place "LudecletiGua21" (sites "MAU"))
+            (place "LudecletiTuk21" (sites "PAU"))
+            (place "LudecletiKua21" (sites "KIA"))
+            (place "LudecletiMaun11" (sites "LIA"))
+            (place "LudecletiKaun11" (sites "NIA"))
+            (place "LudecletiUai11" (sites "TIA"))
+            (place "DelunletiIo1" (sites "ZIA"))
+            (place "DelunletiUai11" (sites "XIA"))
+            (place "DelunletiKaun11" (sites "CIA"))
+            (place "DelunletiMaun11" (sites "MIA"))
+            (place "DelunletiKua21" (sites "PIA"))
+            (place "TaXot1Marker0" (handSite P1 30))
+            (place "TyMok1Marker0" (handSite P1 31))
+            (place "TaXot1Marker0" (handSite P2 30))
+            (place "TyMok1Marker0" (handSite P2 31))
+        })
+        (play
+            (if (<= (var "StarterChosen") 0)
+                "ChooseStarter"
+                (if (and {(= (var "DeclarationPending") (mover)) (= (var "StepOverPending") 0) (= (var "StepOverMode") 0) (= (var "Tam2Pending") 0)})
+                    "DeclarationChoice"
+                    (do
+                        "CetkaikMove"
+                        ifAfterwards:(and {"WaterEntryAllowed" "BoardStacksAllowed"})
+                        (then "AfterCetkaikMove")
+                    )
+                )
+            )
+        )
+        (end
+            {
+                (if
+                    (and {
+                        (= (var "StepOverPending") 0)
+                        (= (var "StepOverMode") 0)
+                        (= (var "Tam2Pending") 0)
+                        (or {(>= (score P1) 40) (<= (score P2) 0)})
+                    })
+                    (result P1 Win)
+                )
+                (if
+                    (and {
+                        (= (var "StepOverPending") 0)
+                        (= (var "StepOverMode") 0)
+                        (= (var "Tam2Pending") 0)
+                        (or {(>= (score P2) 40) (<= (score P1) 0)})
+                    })
+                    (result P2 Win)
+                )
+                (if
+                    (and {
+                        (= (var "StepOverPending") 0)
+                        (= (var "StepOverMode") 0)
+                        (= (var "Tam2Pending") 0)
+                        (>= (var "Season") <Seasons:num>)
+                    })
+                    (byScore)
+                )
+            }
+        )
+    )
+)
+
+(option "Seasons" <Seasons> args:{ <num> } {
+    (item "1" <1> "Play 1 season.")
+    (item "2" <2> "Play 2 seasons.")
+    (item "4" <4> "Play 4 seasons.")*
+})
+
+(metadata
+    (info {
+        (description "Cetkaik, also called Sekkaiku or Cerke, is a 9x9 two-player board game in which players capture pieces, build hands, and score across xot1 seasons.")
+        (rules "This implementation follows the standardized Cetkaik rule with the official 9x9 initial position, capture to hand, hand drops, standard and tam2 hue movement, neutral tam2 movement, tam2 water entry casts using five sticks, role scoring with Io as a same-colour wildcard, xot1 season reset, starter selection by both players' five-stick throws with rerolls on ties, and 1, 2, or 4 season options. Stepping-over is implemented for same-line moves, direction-changing one-step continuations, sliding continuations with five-stick distance limits, fixed two-step continuations for jumping pieces, and the tam2 hue Maun1 diagonal continuation that ignores adjacent blockers. Declaration choices are offered after a completed turn when the mover's role score has newly increased or a negative situation role has occurred, and ty mok1 doubles the shared season rate. Gekkou and tam2 return penalties are scored as negative situation roles at xot1.")
+        (source "Japan Cetkaik Association, The Standardized Rule of Cetkaik, https://sites.google.com/view/cet2kaik/")
+        (version "0.9")
+        (credit "Implemented for Ludii from the Japan Cetkaik Association standardized rule pages and sozysozbot/cerke rule summary.")
+    })
+    (graphics {
+        (player Colour P1 (colour White))
+        (player Colour P2 (colour LightGrey))
+        (show Symbol "square" Cell (sites "TamHue") fillColour:(colour 255 153 88) edgeColour:(colour Black) scale:1.0)
+        (show Symbol "square" Cell (sites {"E7" "E6" "C5" "D5" "F5" "G5" "E4" "E3"}) fillColour:(colour 129 199 211) edgeColour:(colour Black) scale:1.0)
+        (show Symbol "square" Cell (sites "TamZo") fillColour:(colour 88 116 91) edgeColour:(colour Black) scale:1.0)
+        (piece Rename piece:"Die1" "SetDilthDice")
+        (piece Rename piece:"Die2" "SetDilthDice")
+        (piece Rename piece:"Die3" "SetDilthDice")
+        (piece Rename piece:"Die4" "SetDilthDice")
+        (piece Rename piece:"Die5" "SetDilthDice")
+        (piece Style "Die" NativeAmericanDice)
+        (show Symbol "assets/cetkaik/cerke_diag_backslash.svg" Cell (union {(sites "NI") (sites "TU") (sites "XY") (sites "CAI") (sites "ZO")}) fillColour:(colour Black) edgeColour:(colour Black) scale:1.0)
+        (show Symbol "assets/cetkaik/cerke_diag_slash.svg" Cell (union {(sites "CI") (sites "XU") (sites "TY") (sites "NAI") (sites "ZO")}) fillColour:(colour Black) edgeColour:(colour Black) scale:1.0)
+
+        (piece Rename piece:"LudecletiNuak" "null")
+        (piece Rename piece:"LudecletiKauk" "null")
+        (piece Rename piece:"LudecletiGua" "null")
+        (piece Rename piece:"LudecletiKaun" "null")
+        (piece Rename piece:"LudecletiDau" "null")
+        (piece Rename piece:"LudecletiMaun" "null")
+        (piece Rename piece:"LudecletiKua" "null")
+        (piece Rename piece:"LudecletiTuk" "null")
+        (piece Rename piece:"LudecletiUai" "null")
+        (piece Rename piece:"LudecletiIo" "null")
+        (piece Rename piece:"DelunletiNuak" "null")
+        (piece Rename piece:"DelunletiKauk" "null")
+        (piece Rename piece:"DelunletiGua" "null")
+        (piece Rename piece:"DelunletiKaun" "null")
+        (piece Rename piece:"DelunletiDau" "null")
+        (piece Rename piece:"DelunletiMaun" "null")
+        (piece Rename piece:"DelunletiKua" "null")
+        (piece Rename piece:"DelunletiTuk" "null")
+        (piece Rename piece:"DelunletiUai" "null")
+        (piece Rename piece:"DelunletiIo" "null")
+        (piece Rename piece:"TaXot1Marker" "null")
+        (piece Rename piece:"TyMok1Marker" "null")
+        (piece Rename piece:"Tam" "null")
+
+        (piece Background "LudecletiNuak" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiKauk" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiGua" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiKaun" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiDau" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiMaun" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiKua" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiTuk" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiUai" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "LudecletiIo" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiNuak" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiKauk" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiGua" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiKaun" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiDau" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiMaun" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiKua" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiTuk" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiUai" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "DelunletiIo" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+        (piece Background "TaXot1Marker" image:"square.svg" fillColour:(colour 245 245 245) edgeColour:(colour Black) scale:0.95)
+        (piece Background "TyMok1Marker" image:"square.svg" fillColour:(colour 245 245 245) edgeColour:(colour Black) scale:0.95)
+        (piece Background "Tam" image:"square.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.95)
+
+        (piece Foreground P1 "LudecletiNuak" image:"assets/cetkaik/cerke_glyph_nuak.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiNuak" image:"assets/cetkaik/cerke_glyph_nuak.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiKauk" image:"assets/cetkaik/cerke_glyph_kauk.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiKauk" image:"assets/cetkaik/cerke_glyph_kauk.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiGua" image:"assets/cetkaik/cerke_glyph_gua.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiGua" image:"assets/cetkaik/cerke_glyph_gua.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiKaun" image:"assets/cetkaik/cerke_glyph_kaun.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiKaun" image:"assets/cetkaik/cerke_glyph_kaun.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiDau" image:"assets/cetkaik/cerke_glyph_dau.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiDau" image:"assets/cetkaik/cerke_glyph_dau.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiMaun" image:"assets/cetkaik/cerke_glyph_maun.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiMaun" image:"assets/cetkaik/cerke_glyph_maun.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiKua" image:"assets/cetkaik/cerke_glyph_kua.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiKua" image:"assets/cetkaik/cerke_glyph_kua.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiTuk" image:"assets/cetkaik/cerke_glyph_tuk.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiTuk" image:"assets/cetkaik/cerke_glyph_tuk.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiUai" image:"assets/cetkaik/cerke_glyph_uai.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiUai" image:"assets/cetkaik/cerke_glyph_uai.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "LudecletiIo" image:"assets/cetkaik/cerke_glyph_io.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82)
+        (piece Foreground P2 "LudecletiIo" image:"assets/cetkaik/cerke_glyph_io.svg" fillColour:(colour White) edgeColour:(colour 214 48 0) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiNuak" image:"assets/cetkaik/cerke_glyph_nuak.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiNuak" image:"assets/cetkaik/cerke_glyph_nuak.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiKauk" image:"assets/cetkaik/cerke_glyph_kauk.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiKauk" image:"assets/cetkaik/cerke_glyph_kauk.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiGua" image:"assets/cetkaik/cerke_glyph_gua.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiGua" image:"assets/cetkaik/cerke_glyph_gua.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiKaun" image:"assets/cetkaik/cerke_glyph_kaun.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiKaun" image:"assets/cetkaik/cerke_glyph_kaun.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiDau" image:"assets/cetkaik/cerke_glyph_dau.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiDau" image:"assets/cetkaik/cerke_glyph_dau.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiMaun" image:"assets/cetkaik/cerke_glyph_maun.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiMaun" image:"assets/cetkaik/cerke_glyph_maun.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiKua" image:"assets/cetkaik/cerke_glyph_kua.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiKua" image:"assets/cetkaik/cerke_glyph_kua.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiTuk" image:"assets/cetkaik/cerke_glyph_tuk.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiTuk" image:"assets/cetkaik/cerke_glyph_tuk.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiUai" image:"assets/cetkaik/cerke_glyph_uai.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiUai" image:"assets/cetkaik/cerke_glyph_uai.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground P1 "DelunletiIo" image:"assets/cetkaik/cerke_glyph_io.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82)
+        (piece Foreground P2 "DelunletiIo" image:"assets/cetkaik/cerke_glyph_io.svg" fillColour:(colour White) edgeColour:(colour Black) scale:0.82 rotation:180)
+        (piece Foreground "TaXot1Marker" text:"ta xot1" fillColour:(colour Black) scale:0.38)
+        (piece Foreground "TyMok1Marker" text:"ty mok1" fillColour:(colour Black) scale:0.38)
+        (piece Foreground "Tam" image:"assets/cetkaik/cerke_glyph_tam.svg" fillColour:(colour White) edgeColour:(colour 0 128 64) scale:0.82)
+    })
+)
+
+(ai
+    (bestAgent "Alpha-Beta")
+    (heuristics {
+        (score weight:1.0)
+        (material weight:0.45 pieceWeights:{
+            (pair "LudecletiIo" 4.0)
+            (pair "DelunletiIo" 4.0)
+            (pair "LudecletiKauk2" 1.8)
+            (pair "DelunletiKauk2" 1.8)
+            (pair "LudecletiUai1" 1.5)
+            (pair "DelunletiUai1" 1.5)
+            (pair "LudecletiKaun1" 1.4)
+            (pair "DelunletiKaun1" 1.4)
+            (pair "LudecletiKua2" 1.4)
+            (pair "DelunletiKua2" 1.4)
+            (pair "LudecletiTuk2" 1.4)
+            (pair "DelunletiTuk2" 1.4)
+            (pair "LudecletiGua2" 1.2)
+            (pair "DelunletiGua2" 1.2)
+            (pair "LudecletiMaun1" 1.2)
+            (pair "DelunletiMaun1" 1.2)
+            (pair "LudecletiNuak1" 1.0)
+            (pair "DelunletiNuak1" 1.0)
+            (pair "LudecletiDau2" 1.0)
+            (pair "DelunletiDau2" 1.0)
+        })
+        (material weight:-0.45 boardOnly:True pieceWeights:{
+            (pair "LudecletiIo" 4.0)
+            (pair "DelunletiIo" 4.0)
+            (pair "LudecletiKauk2" 1.8)
+            (pair "DelunletiKauk2" 1.8)
+            (pair "LudecletiUai1" 1.5)
+            (pair "DelunletiUai1" 1.5)
+            (pair "LudecletiKaun1" 1.4)
+            (pair "DelunletiKaun1" 1.4)
+            (pair "LudecletiKua2" 1.4)
+            (pair "DelunletiKua2" 1.4)
+            (pair "LudecletiTuk2" 1.4)
+            (pair "DelunletiTuk2" 1.4)
+            (pair "LudecletiGua2" 1.2)
+            (pair "DelunletiGua2" 1.2)
+            (pair "LudecletiMaun1" 1.2)
+            (pair "DelunletiMaun1" 1.2)
+            (pair "LudecletiNuak1" 1.0)
+            (pair "DelunletiNuak1" 1.0)
+            (pair "LudecletiDau2" 1.0)
+            (pair "DelunletiDau2" 1.0)
+        })
+        (unthreatenedMaterial weight:0.05 pieceWeights:{
+            (pair "LudecletiIo" 4.0)
+            (pair "DelunletiIo" 4.0)
+            (pair "LudecletiKauk2" 1.8)
+            (pair "DelunletiKauk2" 1.8)
+            (pair "LudecletiUai1" 1.5)
+            (pair "DelunletiUai1" 1.5)
+            (pair "LudecletiKaun1" 1.4)
+            (pair "DelunletiKaun1" 1.4)
+            (pair "LudecletiKua2" 1.4)
+            (pair "DelunletiKua2" 1.4)
+            (pair "LudecletiTuk2" 1.4)
+            (pair "DelunletiTuk2" 1.4)
+            (pair "LudecletiGua2" 1.2)
+            (pair "DelunletiGua2" 1.2)
+            (pair "LudecletiMaun1" 1.2)
+            (pair "DelunletiMaun1" 1.2)
+            (pair "LudecletiNuak1" 1.0)
+            (pair "DelunletiNuak1" 1.0)
+            (pair "LudecletiDau2" 1.0)
+            (pair "DelunletiDau2" 1.0)
+        })
+        (mobilityAdvanced weight:0.02)
+        (influenceAdvanced weight:0.03)
+    })
+)
