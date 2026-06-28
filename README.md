@@ -2,15 +2,14 @@
 
 ## References
 
-## Ludii
+### Ludii
 - https://github.com/Ludeme/Ludii : Ludii GitHub Repository
 - Official Documents
     - https://ludii.games/downloads/LudiiUserGuide.pdf
     - https://ludii.games/downloads/LudiiLanguageReference.pdf
     - https://ludii.games/downloads/LudiiGameLogicGuide.pdf
 
-## Cet2kaik
-
+### Cet2kaik
 - GitHub Repositories
     - https://github.com/sozysozbot/cerke/
     - https://github.com/jurliyuuri/cerke_online_alpha/
